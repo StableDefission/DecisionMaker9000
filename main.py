@@ -6,6 +6,11 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox, QInputDialog
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QPalette, QColor, QIntValidator
 
+class HandCursorButton(QPushButton):
+    def __init__(self, title, parent=None):
+        super().__init__(title, parent)
+        self.setCursor(Qt.PointingHandCursor)
+        
 class SettingsDialog(QDialog):
     def __init__(self, parent, theme):
         super().__init__(parent)
@@ -17,11 +22,17 @@ class SettingsDialog(QDialog):
         self.duration_input.setValidator(QIntValidator(1, 3600))
         layout.addRow("Duration (seconds):", self.duration_input)
 
+        # Add Sort Order Selection
+        self.sort_order_selection = QComboBox()
+        self.sort_order_selection.addItems(["Alphabetical", "Weight"])
+        layout.addRow("Sort Order:", self.sort_order_selection)
+
         self.theme_selection = QComboBox()
         self.theme_selection.addItems(["Dark", "Light"])
         layout.addRow("Theme:", self.theme_selection)
 
         save_button = QPushButton('Save')
+        save_button.setCursor(Qt.PointingHandCursor)
         save_button.clicked.connect(self.save_settings)
         layout.addRow(save_button)
 
@@ -50,11 +61,15 @@ class SettingsDialog(QDialog):
     def save_settings(self):
         settings = {
             'duration': int(self.duration_input.text() or 5),
-            'theme': self.theme_selection.currentText()
+            'theme': self.theme_selection.currentText(),
+            'sort_order': self.sort_order_selection.currentText()  # Save sort order setting
         }
+        
         with open('settings.json', 'w') as file:
             json.dump(settings, file)
+        
         self.parent().apply_settings(settings)  # Apply settings immediately
+        self.parent().refresh_options_list()  # Add this line to refresh the list immediately
         self.accept()  # Close the dialog
 
     def load_settings(self):
@@ -63,6 +78,7 @@ class SettingsDialog(QDialog):
                 settings = json.load(file)
                 self.duration_input.setText(str(settings.get('duration', 5)))
                 self.theme_selection.setCurrentText(settings.get('theme', 'Dark'))
+            self.sort_order_selection.setCurrentText(settings.get('sort_order', 'Alphabetical'))
         except FileNotFoundError:
             pass
 
@@ -98,11 +114,13 @@ class DecisionMaker9000(QMainWindow):
         option_layout.addWidget(self.option_input)
         option_layout.addWidget(self.weight_input)
         self.add_button = QPushButton('Add')
+        self.add_button.setCursor(Qt.PointingHandCursor)
         self.add_button.clicked.connect(self.add_option)
         option_layout.addWidget(self.add_button)
         layout.addLayout(option_layout)
 
         self.save_button = QPushButton('Save List')
+        self.save_button.setCursor(Qt.PointingHandCursor)
         self.save_button.clicked.connect(self.save_options)
 
         self.load_combobox = QComboBox()
@@ -110,8 +128,9 @@ class DecisionMaker9000(QMainWindow):
         self.load_combobox.addItems(self.get_saved_lists())
         self.load_combobox.activated[str].connect(self.load_options)
 
-        self.delete_list_button = QPushButton('Delete List')  # New delete button for the list
-        self.delete_list_button.clicked.connect(self.delete_list)  # Connect to the delete_list method
+        self.delete_list_button = QPushButton('Delete List')
+        self.delete_list_button.setCursor(Qt.PointingHandCursor)
+        self.delete_list_button.clicked.connect(self.delete_list)
 
         save_load_layout = QHBoxLayout()
         save_load_layout.addWidget(self.save_button)
@@ -129,14 +148,17 @@ class DecisionMaker9000(QMainWindow):
         layout.addWidget(self.options_list)
 
         self.start_button = QPushButton('Start')
+        self.start_button.setCursor(Qt.PointingHandCursor)
         self.start_button.clicked.connect(self.start_decision_process)
         layout.addWidget(self.start_button)
 
         self.delete_button = QPushButton('Delete Option(s)')
-        self.delete_button.clicked.connect(self.delete_selected_options)  # Connect the delete button
+        self.delete_button.setCursor(Qt.PointingHandCursor)
+        self.delete_button.clicked.connect(self.delete_selected_options)
         layout.addWidget(self.delete_button)
 
         self.settings_button = QPushButton('Settings')
+        self.settings_button.setCursor(Qt.PointingHandCursor)
         self.settings_button.clicked.connect(self.show_settings_dialog)
         layout.addWidget(self.settings_button)
 
@@ -162,13 +184,12 @@ class DecisionMaker9000(QMainWindow):
         option_text = self.option_input.text().strip()
         weight = self.weight_input.value()
         if option_text:
-            # Split the input by commas to support multiple options
             options = [opt.strip() for opt in option_text.split(',') if opt.strip()]
             for opt in options:
                 self.options.append((opt, weight))
-                self.options_list.addItem(f"{opt} (Weight: {weight})")
             self.option_input.clear()
             self.weight_input.setValue(1)
+            self.refresh_options_list()
 
     def edit_option(self, item):
         index = self.options_list.row(item)
@@ -256,6 +277,18 @@ class DecisionMaker9000(QMainWindow):
                 # If the list is being overwritten, we might need to update the list in the UI or other data structures as needed
                 pass
                 
+    def refresh_options_list(self):
+        if self.sort_order == 'Weight':
+            # Sort by weight (highest first) and then alphabetically
+            self.options.sort(key=lambda x: (-x[1], x[0]))
+        else:
+            # Default alphabetical sort
+            self.options.sort(key=lambda x: x[0])
+
+        self.options_list.clear()
+        for option_text, weight in self.options:
+            self.options_list.addItem(f"{option_text} (Weight: {weight})")
+
     def load_options(self, list_name):
         if list_name == "Select a list to load" or not list_name.strip():
             return
@@ -263,9 +296,7 @@ class DecisionMaker9000(QMainWindow):
         try:
             with open(file_path, 'r') as file:
                 self.options = json.load(file)
-                self.options_list.clear()
-                for option_text, weight in self.options:
-                    self.options_list.addItem(f"{option_text} (Weight: {weight})")
+                self.refresh_options_list()
         except FileNotFoundError:
             print(f"No saved list file found for {file_path}.")
 
@@ -281,6 +312,10 @@ class DecisionMaker9000(QMainWindow):
             self.apply_light_theme()
         else:
             self.apply_dark_theme()
+
+        self.sort_order = settings.get('sort_order', 'Alphabetical')  # Update sort order
+        self.refresh_options_list()  # Refresh the list to apply new sort order
+
 
     def load_settings(self):
         try:
