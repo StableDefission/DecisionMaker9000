@@ -1,4 +1,4 @@
-```markdown
+
 # DecisionMaker9000
 
 DecisionMaker9000 is a PyQt5 application designed to help users make decisions by randomly selecting options based on given weights.
@@ -14,17 +14,9 @@ DecisionMaker9000 is a PyQt5 application designed to help users make decisions b
 
 To install the required dependencies, run the `install.bat` file. This will set up the necessary Python packages and environment settings.
 
-```batch
-./install.bat
-```
-
 ## Running the Application
 
 To start the application, execute the `run.bat` file:
-
-```batch
-./run.bat
-```
 
 ## Usage
 
@@ -48,12 +40,6 @@ Users can choose between a Dark and Light theme for the application through the 
 
 - Python 3.x
 - PyQt5
-
-Make sure you have Python installed on your computer and the PyQt5 library, which can be installed using the `install.bat` script.
-
-## Contributing
-
-Contributions to the DecisionMaker9000 are welcome. Please feel free to fork the repository, make your changes, and submit a pull request.
 
 ## License
 
