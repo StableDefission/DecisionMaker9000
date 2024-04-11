@@ -2,9 +2,10 @@ import sys
 import os
 import json
 import random
-from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox, QInputDialog, QVBoxLayout, QHBoxLayout, QWidget, QLineEdit, QSpinBox, QPushButton, QLabel, QSlider, QComboBox, QFormLayout, QDialog, QListWidget
+from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox, QInputDialog, QVBoxLayout, QHBoxLayout, QWidget, QCheckBox, QLineEdit, QSpinBox, QPushButton, QLabel, QSlider, QComboBox, QFormLayout, QDialog, QListWidget
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QPalette, QColor, QIntValidator
+import subprocess
 
 class HandCursorButton(QPushButton):
     def __init__(self, title, parent=None):
@@ -27,9 +28,15 @@ class SettingsDialog(QDialog):
         self.sort_order_selection.addItems(["Alphabetical", "Weight"])
         layout.addRow("Sort Order:", self.sort_order_selection)
 
+        # Add Font Size Setting
+        self.font_size_input = QSpinBox()
+        self.font_size_input.setRange(8, 30)  # Assuming a reasonable font size range
+        self.font_size_input.setValue(14)  # Default value
+        layout.addRow("Font Size:", self.font_size_input)
+
         self.theme_selection = QComboBox()
         self.theme_selection.addItems(["Dark", "Light"])
-        layout.addRow("Theme:", self.theme_selection)
+        layout.addRow("Theme (app restarts):", self.theme_selection)
 
         save_button = QPushButton('Save')
         save_button.setCursor(Qt.PointingHandCursor)
@@ -59,18 +66,29 @@ class SettingsDialog(QDialog):
                     item.widget().setStyleSheet("color: black;")  # Assuming default text color for light theme
 
     def save_settings(self):
+        current_theme = self.parent().current_theme
+        selected_theme = self.theme_selection.currentText()
+
         settings = {
             'duration': int(self.duration_input.text() or 5),
-            'theme': self.theme_selection.currentText(),
-            'sort_order': self.sort_order_selection.currentText()  # Save sort order setting
+            'theme': selected_theme,
+            'sort_order': self.sort_order_selection.currentText(),
+            'font_size': self.font_size_input.value()
         }
         
         with open('settings.json', 'w') as file:
             json.dump(settings, file)
         
-        self.parent().apply_settings(settings)  # Apply settings immediately
-        self.parent().refresh_options_list()  # Add this line to refresh the list immediately
+        self.parent().apply_settings(settings)
+        self.parent().refresh_options_list()
         self.accept()  # Close the dialog
+
+        # Restart the application only if the theme has changed
+        if current_theme != selected_theme:
+            script_path = os.path.abspath(sys.argv[0])  # Ensure the script path is absolute
+            cmd = [sys.executable, script_path] + sys.argv[1:]
+            QApplication.quit()
+            subprocess.Popen(cmd)
 
     def load_settings(self):
         try:
@@ -79,6 +97,7 @@ class SettingsDialog(QDialog):
                 self.duration_input.setText(str(settings.get('duration', 5)))
                 self.theme_selection.setCurrentText(settings.get('theme', 'Dark'))
             self.sort_order_selection.setCurrentText(settings.get('sort_order', 'Alphabetical'))
+            self.font_size_input.setValue(settings.get('font_size', 14))  # Set font size from settings
         except FileNotFoundError:
             pass
 
@@ -87,6 +106,10 @@ class DecisionMaker9000(QMainWindow):
         super().__init__()
         self.setWindowTitle('DecisionMaker9000')
         self.setGeometry(100, 100, 800, 600)
+
+        self.current_font_size = 14  # Default font size
+
+        self.current_theme = "Dark"  # Set default theme or load from settings
         
         self.lists_directory = 'lists'
         os.makedirs(self.lists_directory, exist_ok=True)
@@ -132,10 +155,15 @@ class DecisionMaker9000(QMainWindow):
         self.delete_list_button.setCursor(Qt.PointingHandCursor)
         self.delete_list_button.clicked.connect(self.delete_list)
 
+        self.new_list_button = QPushButton('New List')
+        self.new_list_button.setCursor(Qt.PointingHandCursor)
+        self.new_list_button.clicked.connect(self.new_list)
+
         save_load_layout = QHBoxLayout()
-        save_load_layout.addWidget(self.save_button)
         save_load_layout.addWidget(self.load_combobox)
-        save_load_layout.addWidget(self.delete_list_button)  # Add the delete button to the layout
+        save_load_layout.addWidget(self.save_button)
+        save_load_layout.addWidget(self.new_list_button)
+        save_load_layout.addWidget(self.delete_list_button)
         layout.addLayout(save_load_layout)
 
         self.display_area = QLabel("Your options will appear here!")
@@ -152,11 +180,21 @@ class DecisionMaker9000(QMainWindow):
         self.start_button.clicked.connect(self.start_decision_process)
         layout.addWidget(self.start_button)
 
+        action_buttons_layout = QHBoxLayout()
+        self.selectAllCheckBox = QCheckBox("Select/Deselect All")
+        self.selectAllCheckBox.stateChanged.connect(self.toggle_select_all)
+        action_buttons_layout.addWidget(self.selectAllCheckBox)  # Add the checkbox
+
         self.delete_button = QPushButton('Delete Option(s)')
         self.delete_button.setCursor(Qt.PointingHandCursor)
         self.delete_button.clicked.connect(self.delete_selected_options)
-        layout.addWidget(self.delete_button)
+        action_buttons_layout.addWidget(self.delete_button)  # Add the delete button
 
+        # Add a stretch factor to make the delete button take up the remaining space
+        action_buttons_layout.setStretch(0, 1)  # Set stretch factor for the checkbox
+        action_buttons_layout.setStretch(1, 3)  # Set a higher stretch factor for the delete button
+
+        layout.addLayout(action_buttons_layout)  # Add the action buttons layout to the main layout
         self.settings_button = QPushButton('Settings')
         self.settings_button.setCursor(Qt.PointingHandCursor)
         self.settings_button.clicked.connect(self.show_settings_dialog)
@@ -164,6 +202,18 @@ class DecisionMaker9000(QMainWindow):
 
         central_widget.setLayout(layout)
 
+    def new_list(self):
+        self.options = []  # Clear current options
+        self.refresh_options_list()
+        self.load_combobox.setCurrentIndex(0)  # Reset to the default "Select a list to load"
+
+
+    def toggle_select_all(self, state):
+        is_checked = state == Qt.Checked
+        for index in range(self.options_list.count()):
+            item = self.options_list.item(index)
+            item.setSelected(is_checked)
+            
     def delete_list(self):
         list_name = self.load_combobox.currentText()
         if list_name and list_name != "Select a list to load":
@@ -308,14 +358,46 @@ class DecisionMaker9000(QMainWindow):
     def apply_settings(self, settings):
         self.duration = settings.get('duration', 5) * 1000
         theme = settings.get('theme', 'Dark')
-        if theme == "Light":
-            self.apply_light_theme()
-        else:
-            self.apply_dark_theme()
+        self.current_theme = settings.get('theme', 'Dark')  # Update current theme
 
-        self.sort_order = settings.get('sort_order', 'Alphabetical')  # Update sort order
+        # Check if the theme has changed and apply the new theme
+        current_theme = "Dark" if self.palette() == self.dark_palette else "Light"
+        if theme != current_theme:
+            if theme == "Light":
+                self.apply_light_theme()
+            else:
+                self.apply_dark_theme()
+
+        self.sort_order = settings.get('sort_order', 'Alphabetical')
         self.refresh_options_list()  # Refresh the list to apply new sort order
 
+        font_size = settings.get('font_size', 14)
+        self.apply_font_size(font_size)
+
+    def apply_font_size(self, font_size):
+        self.current_font_size = font_size
+
+        # Update the font for the application
+        app_font = QApplication.instance().font()
+        app_font.setPointSize(font_size)
+        QApplication.instance().setFont(app_font)
+
+        # Update the display_area font to be font_size + 10
+        display_font = self.display_area.font()
+        display_font.setPointSize(font_size + 10)  # Increase the font size for display_area
+        self.display_area.setFont(display_font)
+
+        # Update the styles to reflect the new font size
+        if self.palette() == self.dark_palette:
+            self.apply_dark_theme()
+        else:
+            self.apply_light_theme()
+
+    def update_widget_fonts(self, widget, font):
+        if isinstance(widget, QWidget):  # Ensure widget is an instance of QWidget
+            widget.setFont(font)
+            for child in widget.children():
+                self.update_widget_fonts(child, font)
 
     def load_settings(self):
         try:
@@ -345,12 +427,15 @@ class DecisionMaker9000(QMainWindow):
         palette.setColor(QPalette.Link, QColor(42, 130, 218))
         palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
         palette.setColor(QPalette.HighlightedText, textColor)
-        
+
+        # Update the style for the checkbox text color
+        self.selectAllCheckBox.setStyleSheet("QCheckBox { color: white; }")
+
         # Apply the palette to the application
         self.setPalette(palette)
 
         # Update the label style directly
-        self.display_area.setStyleSheet("QLabel { color : yellow; font: bold 24px;}")
+        self.display_area.setStyleSheet("QLabel { color : yellow;}")
         
         # Additional styling to improve button readability
         button_style = f"""
@@ -363,7 +448,7 @@ class DecisionMaker9000(QMainWindow):
                 border-color: beige;
                 font: bold 14px;
                 min-width: 10em;
-                padding: 6px;
+                padding: 8px;
             }}
             QPushButton:pressed {{
                 background-color: {buttonColor.lighter().name()};
@@ -371,7 +456,8 @@ class DecisionMaker9000(QMainWindow):
             }}
         """
         self.setStyleSheet(button_style)
-        
+        self.set_custom_style(self.dark_palette, self.current_font_size, QColor(70, 70, 70), QColor(Qt.white))
+            
     def get_dark_palette(self):
         palette = QPalette()
         palette.setColor(QPalette.Window, QColor(35, 35, 35))
@@ -393,6 +479,31 @@ class DecisionMaker9000(QMainWindow):
     def apply_light_theme(self):
         self.setPalette(QApplication.style().standardPalette())
 
+        self.display_area.setStyleSheet("QLabel { color: red;}")
+
+        self.selectAllCheckBox.setStyleSheet("QCheckBox { color: black; }")
+        self.set_custom_style(QApplication.style().standardPalette(), self.current_font_size, QColor(255, 255, 255), QColor(0, 0, 0))
+
+    def set_custom_style(self, palette, font_size, button_color, text_color):
+        self.setPalette(palette)
+        # Dynamically setting the font size in the style sheet
+        button_style = f"""
+            QPushButton {{
+                font-size: {font_size}px;
+                background-color: {button_color.name()};
+                color: {text_color.name()};
+                border-style: outset;
+                border-width: 2px;
+                border-radius: 10px;
+                border-color: beige;
+                padding: 8px;
+            }}
+            QPushButton:pressed {{
+                background-color: {button_color.lighter().name()};
+                border-style: inset;
+            }}
+        """
+        self.setStyleSheet(button_style)
 def main():
     app = QApplication(sys.argv)
     main_window = DecisionMaker9000()
