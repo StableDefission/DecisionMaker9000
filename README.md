@@ -9,6 +9,7 @@ DecisionMaker9000 is a PyQt5 application designed to help users make decisions b
 - Save and load lists of options.
 - Customize application theme (Dark or Light).
 - Randomly select an option with a simple interface.
+- Custom font size to fit your display.
 
 ## Installation
 
