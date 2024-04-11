@@ -3,6 +3,8 @@
 
 DecisionMaker9000 is a PyQt5 application designed to help users make decisions by randomly selecting options based on given weights.
 
+<img src='https://drive.google.com/uc?export=view&id=1L34o_-ghVxt5Rz3CquZpnRc9TOMPAQde'>
+
 ## Features
 
 - Add and weight options for decision-making.
