@@ -2,10 +2,161 @@ import sys
 import os
 import json
 import random
-from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox, QInputDialog, QVBoxLayout, QHBoxLayout, QWidget, QCheckBox, QLineEdit, QSpinBox, QPushButton, QLabel, QSlider, QComboBox, QFormLayout, QDialog, QListWidget
+from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox, QHeaderView, QTableWidget, QTableWidgetItem, QInputDialog, QVBoxLayout, QHBoxLayout, QWidget, QCheckBox, QLineEdit, QSpinBox, QPushButton, QLabel, QSlider, QComboBox, QFormLayout, QDialog, QListWidget
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QPalette, QColor, QIntValidator
 import subprocess
+
+
+class MultiRollDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Multi-Roll")
+        self.resize(800, 400)
+        self.layout = QVBoxLayout(self)
+
+        # Initialize table and buttons
+        self.init_ui()
+
+        # Apply dark theme from parent if available
+        if parent and hasattr(parent, 'apply_dark_theme_to_dialog'):
+            parent.apply_dark_theme_to_dialog(self)
+
+    def init_ui(self):
+        # Table for lists and results
+        self.table = QTableWidget(0, 4)  # Start with no rows
+        self.table.setHorizontalHeaderLabels(['List Name', 'Result', 'Delete', 'Lock'])
+        self.layout.addWidget(self.table)
+        
+        self.init_table()
+        
+        # Button to add new rows
+        self.add_button = QPushButton("Add Row", self)
+        self.add_button.clicked.connect(self.add_row)
+        self.layout.addWidget(self.add_button)
+
+        # Button to start the roll process
+        self.start_button = QPushButton("Start Roll", self)
+        self.start_button.clicked.connect(self.start_roll)
+        self.layout.addWidget(self.start_button)
+
+    def init_table(self):
+        self.add_row()  # Start with one row
+        
+        # Setting fixed column widths for 'List Name' and 'Delete'
+        self.table.setColumnWidth(0, 250)  # 'List Name'
+        self.table.setColumnWidth(2, 150)  # 'Delete'
+        self.table.setColumnWidth(3, 150)  # 'Lock'
+        
+        # Setting the 'Result' column to dynamically resize with the window
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(1, QHeaderView.Stretch)  # 'Result' column stretches
+
+        # Adjust the height of the rows
+        default_row_height = 30
+        self.table.verticalHeader().setDefaultSectionSize(default_row_height)
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setStyleSheet(self.get_header_style())
+
+    def get_header_style(self):
+        # Ensure the font size can be retrieved from the main window settings or set a default
+        font_size = self.parent().current_font_size if hasattr(self.parent(), 'current_font_size') else 12
+        return f"""
+        QHeaderView::section {{
+            background-color: #353535;  # Dark gray background
+            color: white;               # White text
+            border: none;
+            padding-left: 4px;
+            font-size: {font_size}px;   # Use dynamic or default font size
+        }}
+        """
+
+    
+    @staticmethod
+    def apply_dark_theme_to_combobox(combobox):
+        combobox.setStyleSheet("""
+            QComboBox, QAbstractItemView {
+                color: white;
+                background-color: #353535; /* Dark background */
+                selection-background-color: #6a6ea9; /* Color for selected items */
+            }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 15px;
+                border-left-width: 1px;
+                border-left-color: darkgray;
+                border-left-style: solid;
+            }
+            QComboBox::down-arrow {
+                image: url('path/to/your/down_arrow_icon.png'); /* Path to the icon */
+            }
+        """)
+
+    def add_row(self):
+        row_position = self.table.rowCount()
+        self.table.insertRow(row_position)
+
+        # Adding a combo box with list selections
+        list_selector = QComboBox()
+        MultiRollDialog.apply_dark_theme_to_combobox(list_selector)
+        list_selector.addItems(self.parent().get_saved_lists())
+        self.table.setCellWidget(row_position, 0, list_selector)
+
+        # Placeholder for result display
+        self.table.setItem(row_position, 1, QTableWidgetItem(""))
+
+        # Delete button for the row
+        delete_btn = QPushButton("X")
+        delete_btn.clicked.connect(lambda: self.delete_row(row_position))
+        self.table.setCellWidget(row_position, 2, delete_btn)
+
+        # Checkbox for locking the row
+        lock_checkbox = QCheckBox()
+        checkbox_container = QWidget()  # Create a container widget
+        checkbox_layout = QHBoxLayout(checkbox_container)  # Create a horizontal box layout
+        checkbox_layout.addWidget(lock_checkbox)  # Add the checkbox to the layout
+        checkbox_layout.setAlignment(Qt.AlignCenter)  # Center the checkbox in the layout
+        checkbox_layout.setContentsMargins(0, 0, 0, 0)  # Remove margins to ensure it stays centered
+        self.table.setCellWidget(row_position, 3, checkbox_container)  # Add the container to the table
+
+    def delete_row(self, row):
+        if self.table.rowCount() > 1:
+            self.table.removeRow(row)
+
+    def start_roll(self):
+        for row in range(self.table.rowCount()):
+            checkbox_container = self.table.cellWidget(row, 3)  # Get the container widget
+            checkbox = checkbox_container.layout().itemAt(0).widget()  # Access the QCheckBox from the layout
+            if not checkbox.isChecked():  # Check if the lock checkbox is not checked
+                self.finish_roll(row)
+
+
+    def finish_roll(self, row):
+        list_name = self.table.cellWidget(row, 0).currentText()
+        result = self.roll_for_list(list_name)
+        self.table.item(row, 1).setText(result)
+
+    def roll_for_list(self, list_name):
+        weighted_options = self.fetch_list_data(list_name)
+        if not weighted_options:
+            return "No data available"
+        options, weights = zip(*weighted_options)  # Separate the options and weights
+        result = random.choices(options, weights=weights, k=1)[0]  # Use random.choices to consider weights
+        return result
+
+
+
+    def fetch_list_data(self, list_name):
+        path = os.path.join(self.parent().lists_directory, f"{list_name}.json")
+        try:
+            with open(path, 'r') as file:
+                data = json.load(file)
+                return [(item[0], item[1]) for item in data]  # Adjust to handle new data format
+        except FileNotFoundError:
+            return []
+
+
 
 class HandCursorButton(QPushButton):
     def __init__(self, title, parent=None):
@@ -13,40 +164,58 @@ class HandCursorButton(QPushButton):
         self.setCursor(Qt.PointingHandCursor)
         
 class SettingsDialog(QDialog):
-    def __init__(self, parent, theme):
+    def __init__(self, parent):
         super().__init__(parent)
         self.setWindowTitle('Settings')
-        
-        layout = QFormLayout()
+        self.setPalette(parent.dark_palette)  # Apply the dark palette from the parent
+        self.setStyleSheet("""
+            QWidget {
+                color: white;
+                background-color: #232323;
+            }
+            QPushButton {
+                background-color: #464646;
+                color: white;
+                border-style: outset;
+                border-width: 2px;
+                border-radius: 10px;
+                border-color: beige;
+                padding: 6px;
+                min-width: 80px;
+            }
+            QPushButton:pressed {
+                background-color: #2c2c2c;
+                border-style: inset;
+            }
+            QComboBox, QLineEdit, QSpinBox, QLabel {
+                color: white;
+                background-color: #2c2c2c;
+            }
+        """)  # Apply consistent styling
 
+        layout = QFormLayout(self)
+
+
+        # Duration setting
         self.duration_input = QLineEdit("5")
         self.duration_input.setValidator(QIntValidator(1, 3600))
         layout.addRow("Duration (seconds):", self.duration_input)
 
-        # Add Sort Order Selection
+        # Sort Order Selection
         self.sort_order_selection = QComboBox()
         self.sort_order_selection.addItems(["Alphabetical", "Weight"])
         layout.addRow("Sort Order:", self.sort_order_selection)
 
-        # Add Font Size Setting
+        # Font Size Setting
         self.font_size_input = QSpinBox()
-        self.font_size_input.setRange(8, 30)  # Assuming a reasonable font size range
-        self.font_size_input.setValue(14)  # Default value
+        self.font_size_input.setRange(8, 30)
+        self.font_size_input.setValue(14)
         layout.addRow("Font Size:", self.font_size_input)
 
-        self.theme_selection = QComboBox()
-        self.theme_selection.addItems(["Dark", "Light"])
-        layout.addRow("Theme (app restarts):", self.theme_selection)
-
+        # Save settings button
         save_button = QPushButton('Save')
-        save_button.setCursor(Qt.PointingHandCursor)
         save_button.clicked.connect(self.save_settings)
         layout.addRow(save_button)
-
-        self.setLayout(layout)
-
-        # Call apply_theme after the layout is set
-        self.apply_theme(theme)
 
         self.load_settings()
 
@@ -65,64 +234,51 @@ class SettingsDialog(QDialog):
                 if item is not None and item.widget() is not None:
                     item.widget().setStyleSheet("color: black;")  # Assuming default text color for light theme
 
-    def save_settings(self):
-        current_theme = self.parent().current_theme
-        selected_theme = self.theme_selection.currentText()
 
+    def save_settings(self):
         settings = {
-            'duration': int(self.duration_input.text() or 5),
-            'theme': selected_theme,
+            'duration': int(self.duration_input.text()),
             'sort_order': self.sort_order_selection.currentText(),
             'font_size': self.font_size_input.value()
         }
-        
+
+        # Save the settings to a JSON file
         with open('settings.json', 'w') as file:
             json.dump(settings, file)
-        
-        self.parent().apply_settings(settings)
-        self.parent().refresh_options_list()
-        self.accept()  # Close the dialog
 
-        # Restart the application only if the theme has changed
-        if current_theme != selected_theme:
-            script_path = os.path.abspath(sys.argv[0])  # Ensure the script path is absolute
-            cmd = [sys.executable, script_path] + sys.argv[1:]
-            QApplication.quit()
-            subprocess.Popen(cmd)
+        self.parent().apply_settings(settings)
+        self.accept()  # Close the dialog after saving settings
 
     def load_settings(self):
         try:
             with open('settings.json', 'r') as file:
                 settings = json.load(file)
                 self.duration_input.setText(str(settings.get('duration', 5)))
-                self.theme_selection.setCurrentText(settings.get('theme', 'Dark'))
-            self.sort_order_selection.setCurrentText(settings.get('sort_order', 'Alphabetical'))
-            self.font_size_input.setValue(settings.get('font_size', 14))  # Set font size from settings
+                self.sort_order_selection.setCurrentText(settings.get('sort_order', 'Alphabetical'))
+                self.font_size_input.setValue(settings.get('font_size', 14))
         except FileNotFoundError:
-            pass
+            pass  # If the file is not found, default settings will be used
+
 
 class DecisionMaker9000(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('DecisionMaker9000')
         self.setGeometry(100, 100, 800, 600)
-
-        self.current_font_size = 14  # Default font size
-
-        self.current_theme = "Dark"  # Set default theme or load from settings
-        
         self.lists_directory = 'lists'
         os.makedirs(self.lists_directory, exist_ok=True)
-        
         self.options = []
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_display)
 
+        # Set up dark palette
         self.dark_palette = self.get_dark_palette()
-        self.light_palette = QApplication.style().standardPalette()
+        self.setPalette(self.dark_palette)
+        self.setStyleSheet(self.get_dark_style_sheet())
 
         self.init_ui()
         self.load_settings()
+
 
     def init_ui(self):
         central_widget = QWidget()
@@ -171,7 +327,7 @@ class DecisionMaker9000(QMainWindow):
         layout.addWidget(self.display_area)
 
         self.options_list = QListWidget()
-        self.options_list.setSelectionMode(QListWidget.MultiSelection)  # Enable multiple selection
+        self.options_list.setSelectionMode(QListWidget.MultiSelection)
         self.options_list.itemDoubleClicked.connect(self.edit_option)
         layout.addWidget(self.options_list)
 
@@ -183,24 +339,31 @@ class DecisionMaker9000(QMainWindow):
         action_buttons_layout = QHBoxLayout()
         self.selectAllCheckBox = QCheckBox("Select/Deselect All")
         self.selectAllCheckBox.stateChanged.connect(self.toggle_select_all)
-        action_buttons_layout.addWidget(self.selectAllCheckBox)  # Add the checkbox
+        action_buttons_layout.addWidget(self.selectAllCheckBox)
 
         self.delete_button = QPushButton('Delete Option(s)')
         self.delete_button.setCursor(Qt.PointingHandCursor)
         self.delete_button.clicked.connect(self.delete_selected_options)
-        action_buttons_layout.addWidget(self.delete_button)  # Add the delete button
+        action_buttons_layout.addWidget(self.delete_button)
 
-        # Add a stretch factor to make the delete button take up the remaining space
-        action_buttons_layout.setStretch(0, 1)  # Set stretch factor for the checkbox
-        action_buttons_layout.setStretch(1, 3)  # Set a higher stretch factor for the delete button
+        layout.addLayout(action_buttons_layout) 
 
-        layout.addLayout(action_buttons_layout)  # Add the action buttons layout to the main layout
+        # Add Multi-Roll button
+        self.multi_roll_button = QPushButton("Multi-Roll", self)
+        self.multi_roll_button.setCursor(Qt.PointingHandCursor)
+        self.multi_roll_button.clicked.connect(self.open_multi_roll_dialog)
+        layout.addWidget(self.multi_roll_button)  # Add the Multi-Roll button to the layout
+
         self.settings_button = QPushButton('Settings')
         self.settings_button.setCursor(Qt.PointingHandCursor)
         self.settings_button.clicked.connect(self.show_settings_dialog)
         layout.addWidget(self.settings_button)
 
         central_widget.setLayout(layout)
+
+    def open_multi_roll_dialog(self):
+        dialog = MultiRollDialog(self)
+        dialog.exec_()
 
     def new_list(self):
         self.options = []  # Clear current options
@@ -351,8 +514,7 @@ class DecisionMaker9000(QMainWindow):
             print(f"No saved list file found for {file_path}.")
 
     def show_settings_dialog(self):
-        current_theme = "Dark" if self.palette() == self.dark_palette else "Light"
-        dialog = SettingsDialog(self, current_theme)
+        dialog = SettingsDialog(self)  # Remove the current_theme argument
         dialog.exec_()
 
     def apply_settings(self, settings):
@@ -473,9 +635,65 @@ class DecisionMaker9000(QMainWindow):
         palette.setColor(QPalette.Link, QColor(42, 130, 218))
         palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
         palette.setColor(QPalette.HighlightedText, Qt.white)
-        
         return palette
-    
+
+    def get_dark_style_sheet(self):
+        return """
+            QPushButton {
+                background-color: #464646;
+                color: white;
+                border-style: outset;
+                border-width: 2px;
+                border-radius: 10px;
+                border-color: beige;
+                padding: 6px;
+                min-width: 80px;
+            }
+            QPushButton:pressed {
+                background-color: #2c2c2c;
+                border-style: inset;
+            }
+            QComboBox, QLineEdit, QSpinBox, QLabel, QCheckBox, QTableWidget {
+                color: white;
+                background-color: #2c2c2c;
+            }
+            QHeaderView::section {
+                background-color: #353535;
+                color: white;
+                padding-left: 4px;
+                border: none;
+            }
+        """
+
+    def apply_dark_theme_to_dialog(self, dialog):
+        # Set the palette for dark theme
+        dialog.setPalette(self.dark_palette)
+        # Apply a consistent style sheet for the dialog
+        dialog.setStyleSheet("""
+            QWidget {
+                color: white;
+                background-color: #232323;
+            }
+            QPushButton {
+                background-color: #464646;
+                color: white;
+                border-style: outset;
+                border-width: 2px;
+                border-radius: 10px;
+                border-color: beige;
+                padding: 6px;
+                min-width: 80px;
+            }
+            QPushButton:pressed {
+                background-color: #2c2c2c;
+                border-style: inset;
+            }
+            QComboBox, QLineEdit, QSpinBox {
+                color: white;
+                background-color: #2c2c2c;
+            }
+        """)
+            
     def apply_light_theme(self):
         self.setPalette(QApplication.style().standardPalette())
 
